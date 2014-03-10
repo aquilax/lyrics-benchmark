@@ -1,14 +1,7 @@
 <?php
 require 'init.php';
 
-class Filler {
-
-	const TYPE_NORMALIZED = 1;
-	const TYPE_DENORMALIZED = 2;
-
-	const ARTIST_TYPE = 'artist';
-	const ALBUM_TYPE = 'album';
-	const SONG_TYPE = 'song';
+class Filler extends BaseClass{
 
 	const MIN_ALBUM_COUNT = 0;
 	const MAX_ALBUM_COUNT = 15;
@@ -22,16 +15,13 @@ class Filler {
 	const MAX_QUEUE_COUNT = 200;
 
 	var $queue = [];
-	var $client = null;
 	var $update = null;
 	var $article_id = 1;
-	var $indexType = self::TYPE_NORMALIZED;
+
 
 	function __construct( Solarium_Client $client, $indexType ) {
-		$this->client = $client;
+		parent::__construct( $client, $indexType );
 		$this->update = $this->client->createUpdate();
-		$this->words = explode(' ', 'One and a-two and a-three Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum On a desert island, a magic yours and my land Everyday is a holiday with you Under a blue sky dear we could get an idea Of what our two lips were meant to do Strolling beside you hand in hand well go Through love promised land dear All our lives I know believe me  Happiness would be ours if for only three hours On a desert  island in my dreams Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum Strolling beside you hand in hand well go Through love promise land dear All our lives I know sincerely Every gal and guy can have a desert island If they are in love as much as we Happiness will be ours if for only three hours On a desert island in my dreams On a desert island in my dreams');
-		$this->wordsSize = count( $this->words );
 	}
 
 	function fill( $artistsCount ){
@@ -63,7 +53,7 @@ class Filler {
 		for ( $i = 1; $i <= $albumsCount; $i++ ) {
 			$doc = $this->newDocument();
 			$albumId = $this->newId();
-			$albumName = $this->generateName( $artist->artist_name, 'Album', $i, $albumId );
+			$albumName = $this->generateName( 'Album', $i);
 			$doc->id = $albumId;
 			$doc->artist_name = $artist->artist_name;
 			$doc->album_name = $albumName;
@@ -85,9 +75,9 @@ class Filler {
 				break;
 			case self::TYPE_DENORMALIZED:
 				return [
-					'name' => $albumDoc->name,
+					'name' => $albumDoc->album_name,
 					'image' => $albumDoc->image,
-					'year' => $albumDoc->year,
+					'year' => $albumDoc->release_date,
 				];
 				break;
 		}
@@ -100,7 +90,7 @@ class Filler {
 		for ( $i = 1; $i <= $songCount; $i++ ) {
 			$doc = $this->newDocument();
 			$songId = $this->newId();
-			$songName = $this->generateName( $artist->artist_name, 'song', $i, $songId );
+			$songName = $this->generateName( 'Song', $i );
 			$doc->id = $songId;
 			$doc->artist_name = $artist->artist_name;
 			$doc->album_name = $albumName;
@@ -121,7 +111,7 @@ class Filler {
 				break;
 			case self::TYPE_DENORMALIZED:
 				return [
-					'name' => $songDoc->name,
+					'name' => $songDoc->song_name,
 				];
 				break;
 		}
@@ -131,16 +121,8 @@ class Filler {
 		return $this->update->createDocument();
 	}
 
-	function generateName() {
-		return implode( ' ', func_get_args() );
-	}
-
 	function generateItunes() {
 		return $this->rand( 100000, 999999 );
-	}
-
-	function rand( $min, $max ) {
-		return mt_rand( $min, $max );
 	}
 
 	function newId() {
