@@ -11,10 +11,15 @@ class Filler {
 	const SONG_TYPE = 'song';
 
 	const MIN_ALBUM_COUNT = 0;
-	const MAX_ALBUM_COUNT = 30;
+	const MAX_ALBUM_COUNT = 15;
 
 	const MIN_SONG_COUNT = 0;
 	const MAX_SONG_COUNT = 30;
+
+	const MIN_LYRICS_WORDS = 60;
+	const MAX_LYRICS_WORDS = 360;
+
+	const MAX_QUEUE_COUNT = 200;
 
 	var $queue = [];
 	var $client = null;
@@ -22,15 +27,20 @@ class Filler {
 	var $article_id = 1;
 	var $indexType = self::TYPE_NORMALIZED;
 
-	function __construct( $client, $indexType ) {
+	function __construct( Solarium_Client $client, $indexType ) {
 		$this->client = $client;
 		$this->update = $this->client->createUpdate();
+		$this->words = explode(' ', 'One and a-two and a-three Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum On a desert island, a magic yours and my land Everyday is a holiday with you Under a blue sky dear we could get an idea Of what our two lips were meant to do Strolling beside you hand in hand well go Through love promised land dear All our lives I know believe me  Happiness would be ours if for only three hours On a desert  island in my dreams Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum Ya-tya-da tya tya da tya tya da tya Ta dee-da-dum Strolling beside you hand in hand well go Through love promise land dear All our lives I know sincerely Every gal and guy can have a desert island If they are in love as much as we Happiness will be ours if for only three hours On a desert island in my dreams On a desert island in my dreams');
+		$this->wordsSize = count( $this->words );
 	}
 
 	function fill( $artistsCount ){
+		// init rand with artistsCount for data consistency
+		mt_srand( $artistsCount );
 		for ( $i = 1; $i <= $artistsCount; $i++ ) {
 			$this->generateArtist($i);
 		}
+		$this->commit(); // commit the last queue
 	}
 
 	function generateArtist ( $index ) {
@@ -42,49 +52,80 @@ class Filler {
 		$doc->type = self::ARTIST_TYPE;
 		$doc->itunes = $this->generateItunes();
 		$doc->image = $this->generateName( 'Artist', $index, '.jpg');
-		$doc->albums = $this->generateAlbums( $artistId, $artistName );
-		$doc->songs = $this->generateSongs( $artistId, $artistName, 0, '');
+		$doc->albums = $this->generateAlbums( $doc );
+		$doc->songs = $this->generateSongs( $doc, null );
 		$this->addDoc( $doc );
 	}
 
-	function generateAlbums( $artistId, $artistName ) {
+	function generateAlbums( $artist ) {
 		$albums = [];
-		$albumsCount = rand( self::MIN_ALBUM_COUNT, self::MAX_ALBUM_COUNT );
+		$albumsCount = $this->rand( self::MIN_ALBUM_COUNT, self::MAX_ALBUM_COUNT );
 		for ( $i = 1; $i <= $albumsCount; $i++ ) {
 			$doc = $this->newDocument();
 			$albumId = $this->newId();
-			$albumName = $this->generateName( $artistName, 'Album', $i, $albumId );
+			$albumName = $this->generateName( $artist->artist_name, 'Album', $i, $albumId );
 			$doc->id = $albumId;
-			$doc->artist_name = $artistName;
+			$doc->artist_name = $artist->artist_name;
 			$doc->album_name = $albumName;
 			$doc->type = self::ALBUM_TYPE;
+			$doc->release_date = $this->rand( 1930, 2014 );
 			$doc->itunes = $this->generateItunes();
 			$doc->image = $this->generateName( 'Album', $i, '.jpg' );
-			$doc->songs = $this->generateSongs( $artistId, $artistName, $albumId, $albumName );
+			$doc->songs = $this->generateSongs( $artist, $doc );
 			$this->addDoc( $doc );
+			$albums[] = $this->getAlbumData( $doc );
 		}
-		return $albums;
+		return json_encode( $albums );
 	}
 
-	function generateSongs( $artistId, $artistName, $albumId, $albumName ) {
+	function getAlbumData( $albumDoc ) {
+		switch ( $this->indexType ) {
+			case self::TYPE_NORMALIZED:
+				return $albumDoc->id;
+				break;
+			case self::TYPE_DENORMALIZED:
+				return [
+					'name' => $albumDoc->name,
+					'image' => $albumDoc->image,
+					'year' => $albumDoc->year,
+				];
+				break;
+		}
+	}
+
+	function generateSongs( $artist, $album ) {
 		$songs = [];
-		$songCount = rand( self::MIN_SONG_COUNT, self::MAX_SONG_COUNT );
+		$albumName = is_null( $album ) ? '' : $album->album_name;
+		$songCount = $this->rand( self::MIN_SONG_COUNT, self::MAX_SONG_COUNT );
 		for ( $i = 1; $i <= $songCount; $i++ ) {
 			$doc = $this->newDocument();
 			$songId = $this->newId();
-			$songName = $this->generateName( $artistName, 'song', $i, $albumId );
-			$doc->id = $albumId;
-			$doc->artist_name = $artistName;
+			$songName = $this->generateName( $artist->artist_name, 'song', $i, $songId );
+			$doc->id = $songId;
+			$doc->artist_name = $artist->artist_name;
 			$doc->album_name = $albumName;
 			$doc->song_name = $songName;
 			$doc->type = self::SONG_TYPE;
 			$doc->itunes = $this->generateItunes();
 			$doc->lyrics = $this->generateLyrics();
 			$this->addDoc( $doc );
+			$songs[] = $this->getSongData( $doc );
 		}
-		return $songs;
+		return json_encode( $songs );
 	}
 
+	function getSongData( $songDoc ) {
+		switch ( $this->indexType ) {
+			case self::TYPE_NORMALIZED:
+				return $songDoc->id;
+				break;
+			case self::TYPE_DENORMALIZED:
+				return [
+					'name' => $songDoc->name,
+				];
+				break;
+		}
+	}
 
 	function newDocument() {
 		return $this->update->createDocument();
@@ -95,7 +136,11 @@ class Filler {
 	}
 
 	function generateItunes() {
-		return rand( 100000, 999999 );
+		return $this->rand( 100000, 999999 );
+	}
+
+	function rand( $min, $max ) {
+		return mt_rand( $min, $max );
 	}
 
 	function newId() {
@@ -104,6 +149,36 @@ class Filler {
 
 	function addDoc( $doc ){
 		$this->queue[] = $doc;
+		$this->autoCommit();
+		echo '.';
+	}
+
+	function autoCommit() {
+		if (self::MAX_QUEUE_COUNT == count( $this->queue )) {
+			$this->commit();
+		}
+	}
+
+	function commit() {
+		$result = null;
+		if ( $this->queue ) {
+			$this->update->addDocuments( $this->queue );
+			$this->update->addCommit();
+			$result = $this->client->update( $this->update );
+			$this->update = $this->client->createUpdate();
+			$this->queue = [];
+			echo 'C';
+		}
+		return $result;
+	}
+
+ 	function generateLyrics() {
+		$words = [];
+		$wordsCount = rand( self::MIN_LYRICS_WORDS, self::MAX_LYRICS_WORDS );
+		for ( $i = 0; $i < $wordsCount; $i++ ) {
+			$words[] = $this->words[rand( 0, $this->wordsSize-1 )];
+		}
+		return implode( ' ', $words );
 	}
 
 }
@@ -113,16 +188,16 @@ $typeSet = [
 	'denormalized' => 2,
 ];
 
-if ( !isset( $argv[1] ) || !is_numeric( $argv[1] ) ) {
+if ( isset( $argv[1] ) && is_numeric( $argv[1] ) ) {
 	$artistsCount = (int)$argv[1];
 } else {
-	die( 'Please provide number of artists to create as first parameter' );
+	die( 'Please provide number of artists to create as first parameter' . PHP_EOL );
 }
 
-if ( !isset( $argv[2] ) || !in_array($argv[2], array_keys( $typeSet ) ) ) {
+if ( isset( $argv[2] ) && in_array($argv[2], array_keys( $typeSet ) ) ) {
 	$indexType = $typeSet[$argv[2]] ;
 } else {
-	die( 'Please provide type of index to create: ' . implode( ', ', $typeSet ) );
+	die( 'Please provide type of index to create: ' . implode( ', ', array_keys( $typeSet ) ) . PHP_EOL );
 }
 
 $filler = new Filler( $client, $indexType );
