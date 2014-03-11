@@ -10,11 +10,14 @@ class BaseClass {
 	const SONG_TYPE = 'song';
 
 	const MIN_ALBUM_COUNT = 0;
-	const MAX_ALBUM_COUNT = 15;
+	const MAX_ALBUM_COUNT = 10;
 
 	const MIN_SONG_COUNT = 3;
-	const MAX_SONG_COUNT = 30;
+	const MAX_SONG_COUNT = 20;
 
+	/**
+	 * @var Solarium_Client
+	 */
 	var $client = null;
 	var $indexType = self::TYPE_NORMALIZED;
 

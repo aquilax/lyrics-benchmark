@@ -4,7 +4,10 @@ require 'init.php';
 
 class Benchmark extends BaseClass {
 
+	var $timers = [];
+
 	function start( $count ) {
+		$this->timers = [];
 		// init rand with count for data consistency
 		mt_srand( $count );
 
@@ -15,6 +18,7 @@ class Benchmark extends BaseClass {
 		$this->test( 'searchLyrics', $count );
 		$this->test( 'searchArtist', $count );
 		$this->test( 'searchSong', $count );
+		$this->printTimers();
 	}
 
 	function dummy( $count ) {
@@ -29,6 +33,7 @@ class Benchmark extends BaseClass {
 	}
 
 	function getArtist ( $count ) {
+		$this->startTimer('getArtist');
 		for ( $i = 0; $i < $count; $i++ ) {
 			$artistName = $this->generateName( 'Artist', $this->rand( 1, 1000 ) );
 			switch ($this->indexType) {
@@ -40,32 +45,43 @@ class Benchmark extends BaseClass {
 					break;
 			}
 		}
+		$this->stopTimer('getArtist');
+	}
+
+	function getFirstResult( $resultSet ) {
+		if ( $resultSet->getNumFound() ) {
+			foreach ($resultSet as $document) {
+				return $document;
+			}
+		}
+		return null;
 	}
 
 	function getArtistNormalized ( $artistName ) {
-		$resultSet = $this->getArtistDeNormalized( $artistName );
-		if ( $resultSet->getNumFound() ) {
-			$artist = $resultSet->getDocuments()[0];
+		$result = null;
+		$this->startTimer('getArtistDeNormalized');
+		$artist = $this->getArtistDeNormalized( $artistName );
+		$this->stopTimer('getArtistDeNormalized');
+		$this->startTimer('getArtistNormalized');
+		if ( $artist ) {
 			$albums = json_decode( $artist->albums, true );
 			$songs = json_decode( $artist->songs, true );
 			$ids = array_merge( $albums, $songs );
-			$types = sprintf( "'%s', '%s'", self::ALBUM_TYPE, self::SONG_TYPE );
-			$query = $this->newQueryFromSearch([
-				//'type: (%1%)' => $types,
-				'id: (%1%)' =>  implode( ' ', $ids ),
-			]);
-			return $this->client->select( $query );
+			if ( count( $ids ) ) {
+				$result = $this->getIds( $ids );
+			}
 		}
+		$this->stopTimer('getArtistNormalized');
+		return $result;
 	}
 
 	function getArtistDeNormalized( $artistName ) {
 		$query = $this->newQueryFromSearch([
 			'type: %1%' => self::ARTIST_TYPE,
 			'artist_name: %P2%' => $artistName,
-
 		]);
 		$query->setStart(0)->setRows(1);
-		return $this->client->select( $query );
+		return $this->getFirstResult( $this->client->select( $query ) );
 	}
 
 	function getAlbum ( $count ) {
@@ -84,20 +100,20 @@ class Benchmark extends BaseClass {
 	}
 
 	function getAlbumNormalized ( $artistName, $albumName ) {
+		$result = null;
+		$this->startTimer('getAlbumDeNormalized');
 		$resultSet = $this->getAlbumDeNormalized( $artistName, $albumName );
+		$this->stopTimer('getAlbumDeNormalized');
+		$this->startTimer('getAlbumNormalized');
 		if ( $resultSet->getNumFound() ) {
 			$album = $resultSet->getDocuments()[0];
 			$songs = json_decode( $album->songs, true );
-			if ( $songs ) {
-				$query = $this->newQueryFromSearch( [
-					//'type: %P1%' => self::SONG_TYPE,
-					'id: (%1%)' =>  implode( ' ', $songs ),
-				] );
-				$query->addSort( 'number', Solarium_Query_Select::SORT_ASC );
-				return $this->client->select( $query );
+			if ( count($songs) ) {
+				$result = $this->getIds( $songs );
 			}
 		}
-		return null;
+		$this->stopTimer('getAlbumNormalized');
+		return $result;
 	}
 
 	function getAlbumDeNormalized( $artistName, $albumName ) {
@@ -130,34 +146,62 @@ class Benchmark extends BaseClass {
 		$query = $this->newQueryFromSearch([
 			'type: %1%' => self::SONG_TYPE,
 			'artist_name: %P2%' => $artistName,
-			'album_name: %P2%' => $albumName,
-			'song_name: %P2%' => $songName,
-
+			'album_name: %P3%' => $albumName,
+			'song_name: %P4%' => $songName,
 		]);
 		$query->setStart(0)->setRows(1);
 		return $this->client->select( $query );
 	}
 
 	function getSongNormalized( $artistName, $albumName, $songName ) {
+		$result = null;
+		$this->startTimer('getSongDeNormalized');
 		$resultSet = $this->getSongDeNormalized( $artistName, $albumName, $songName );
+		$this->stopTimer('getSongDeNormalized');
+		$this->startTimer('getSongNormalized');
 		if ( $resultSet->getNumFound() ) {
 			$song = $resultSet->getDocuments()[0];
 			// JUST select tow random ids here as we don't have the actual data
-			$ids = json_decode( rand(1, 1000), rand(1, 1000) );
-			$query = $this->newQueryFromSearch( [
-				'id: (%1%)' =>  implode( ' ', $ids ),
-			] );
-			return $this->client->select( $query );
+			$ids = [ rand(1, 1000), rand(1, 1000) ];
+			$result = $this->getIds($ids);
 		}
-		return null;
+		$this->stopTimer('getSongNormalized');
+		return $result;
+	}
+
+	function getIds($ids) {
+		$query = $this->newQueryFromSearch( [
+			'id: (%1%)' =>  implode( ' ', $ids ),
+		] );
+		return $this->getFirstResult( $this->client->select( $query ) );
+	}
+
+	function startTimer($name) {
+		if (!isset($this->timers[$name])) {
+			$this->timers[$name] = [
+				'time' => 0
+			];
+		}
+		$this->timers[$name]['start'] = microtime(true);
+	}
+
+	function stopTimer($name) {
+		$this->timers[$name]['time'] += microtime(true) - $this->timers[$name]['start'];
+		$this->timers[$name]['start'] = 0;
+	}
+
+	function printTimers() {
+		foreach ($this->timers as $name => $timer) {
+			self::log( sprintf( '%s => %f s', $name, $timer['time'] ) );
+		}
 	}
 
 	function searchLyrics( $count ) {
 		for ( $i = 0; $i < $count; $i++ ) {
-			$word = $this->words[rand( 0, $this->wordsSize-1 )];
+			$word = $this->words[ $this->rand( 0, $this->wordsSize-1 )];
 			$query = $this->newQueryFromSearch( [
 				'type: %P1%' => self::SONG_TYPE,
-				'lyrics: %1%' =>  $word,
+				'lyrics: %P2%' =>  $word,
 			] );
 			$this->client->select( $query );
 		}
@@ -168,7 +212,7 @@ class Benchmark extends BaseClass {
 			$artistName = $this->generateName( 'Artist', $this->rand( 1, 1000 ) );
 			$query = $this->newQueryFromSearch( [
 				'type: %P1%' => self::ARTIST_TYPE,
-				'search_artist_name: %1%' =>  $artistName,
+				'search_artist_name: %2%' =>  $artistName,
 			] );
 			$this->client->select( $query );
 		}
@@ -179,7 +223,7 @@ class Benchmark extends BaseClass {
 			$artistName = $this->generateName( 'song', $this->rand( self::MIN_SONG_COUNT, self::MAX_SONG_COUNT ) );
 			$query = $this->newQueryFromSearch( [
 				'type: %P1%' => self::SONG_TYPE,
-				'search_song_name: %1%' =>  $artistName,
+				'search_song_name: %2%' =>  $artistName,
 			] );
 			$this->client->select( $query );
 		}
@@ -193,7 +237,7 @@ class Benchmark extends BaseClass {
 
 		$time_end = microtime(true);
 		$time = $time_end - $time_start;
-		self::log( sprintf("Benchmarking %s(%d)\ttype: %d\tresult: %f seconds", $methodName, $this->indexType,  $count, $time ) );
+		self::log( sprintf("Benchmarking %s(%d)\ttype: %d\tresult: %f seconds", $methodName, $count, $this->indexType, $time ) );
 	}
 
 	static function log( $text ) {

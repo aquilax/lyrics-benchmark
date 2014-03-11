@@ -6,7 +6,7 @@ require 'BaseClass.php';
 
 $config = [
 	'adapteroptions' => [
-		'host' => '10.10.10.242',
+		'host' => 'localhost',
 		'port' => 8983,
 		'path' => '/solr/',
 		'core' => 'lyrics',

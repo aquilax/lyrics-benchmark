@@ -12,7 +12,7 @@ class Filler extends BaseClass{
 	const MIN_LYRICS_WORDS = 60;
 	const MAX_LYRICS_WORDS = 360;
 
-	const MAX_QUEUE_COUNT = 200;
+	const MAX_QUEUE_COUNT = 500;
 
 	var $queue = [];
 	var $update = null;
